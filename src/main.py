@@ -144,8 +144,6 @@ def main():
     generator = Generator(learning_rate=args['learning_rate'])
     critic = Critic(learning_rate=args['learning_rate'])
 
-    exit(1)
-
     # Train loop
     train(generator,
           critic,
