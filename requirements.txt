@@ -3,3 +3,4 @@ tensorboard==2.11.*
 matplotlib==3.6.0
 imageio==2.25.1
 protobuf==3.20.*
+tqdm==4.64.1

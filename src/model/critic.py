@@ -14,19 +14,14 @@ class Critic:
 
     def _create_model(self):
         model = Sequential(name='Critic')
-        model.add(layers.Conv2D(self._FEATURE_MAP * 2, input_shape=[28, 28, 1], kernel_size=(5, 5), strides=(2, 2), padding='same',
+        model.add(layers.Conv2D(self._FEATURE_MAP * 1, input_shape=[28, 28, 1], kernel_size=(5, 5), strides=(2, 2), padding='same',
                                 use_bias=False, kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02)))
-        model.add(layers.BatchNormalization())
+        model.add(layers.LayerNormalization())
         model.add(layers.LeakyReLU(0.2))
 
-        model.add(layers.Conv2D(self._FEATURE_MAP * 4, kernel_size=(5, 5), strides=(2, 2), padding='same', use_bias=False,
+        model.add(layers.Conv2D(self._FEATURE_MAP * 2, kernel_size=(5, 5), strides=(2, 2), padding='same', use_bias=False,
                                 kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02)))
-        model.add(layers.BatchNormalization())
-        model.add(layers.LeakyReLU(0.2))
-
-        model.add(layers.Conv2D(self._FEATURE_MAP * 8, kernel_size=(5, 5), strides=(1, 1), padding='same', use_bias=False,
-                                kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02)))
-        model.add(layers.BatchNormalization())
+        model.add(layers.LayerNormalization())
         model.add(layers.LeakyReLU(0.2))
 
         model.add(layers.Flatten())

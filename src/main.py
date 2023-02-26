@@ -1,8 +1,9 @@
 import datetime
+import io
 import os
 import pathlib
-import time
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 
@@ -13,11 +14,11 @@ import tensorflow as tf
 # Check for available GPU
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 if len(physical_devices) > 0:
-    print('Using GPU for model training.\n')
+    tqdm.write('Using GPU for model training.\n')
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
     os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
 else:
-    print('No GPU available for model training. Using CPU instead.\n')
+    tqdm.write('No GPU available for model training. Using CPU instead.\n')
 
 from model import Generator, Critic
 from utils import create_gif
@@ -47,7 +48,7 @@ def load_dataset(buffer_size, batch_size):
     return tf.data.Dataset.from_tensor_slices(train_images).shuffle(buffer_size).batch(batch_size)
 
 
-def generate_and_save_images(model, epoch, test_input, img_path):
+def generate_and_save_images(model, test_input, epoch=None, img_path=None):
     predictions = model(test_input, training=False)
 
     fig = plt.figure(figsize=(4, 4))
@@ -57,8 +58,27 @@ def generate_and_save_images(model, epoch, test_input, img_path):
         plt.imshow(predictions[i, :, :, 0] * 127.5 + 127.5, cmap='gray')
         plt.axis('off')
 
-    plt.savefig('{}/image_at_epoch_{:04d}.png'.format(img_path, epoch))
+    if epoch is not None and img_path is not None:
+        plt.savefig('{}/image_at_epoch_{:04d}.png'.format(img_path, epoch))
+
+    # Step needed to be compatible with tensorboard
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
     plt.close(fig)
+    buf.seek(0)
+
+    image = tf.image.decode_png(buf.getvalue(), channels=4)
+    image = tf.expand_dims(image, 0)
+
+    return image
+
+
+def write_tensorboard_logs(file_writer, label, content, step, content_type='scalar'):
+    with file_writer.as_default():
+        if content_type == 'scalar':
+            tf.summary.scalar(label, content, step=step)
+        elif content_type == 'image':
+            tf.summary.image(label, content, step=step)
 
 
 @tf.function
@@ -104,32 +124,43 @@ def generator_train_step(generator, critic, batch_size, noise_dim):
     return gen_loss
 
 
-def train(generator, critic, dataset, img_path, epochs, num_generate, noise_dim, critic_iterations):
-    print("\n---------- Starting training loop... ----------\n")
+def train(generator, critic, dataset, img_path, epochs, num_generate, noise_dim, critic_iterations, critic_file_writer, generator_file_writer):
+    tqdm.write("\n---------- Starting training loop... ----------\n")
 
     seed = tf.random.normal([num_generate, noise_dim])
 
     generator_loss_hist = []
     critic_loss_hist = []
+    step = 0
 
     for epoch in range(epochs):
-        start = time.time()
+        tqdm.write('Epoch: {}/{}'.format(epoch + 1, epochs))
 
-        for image_batch in dataset:
+        for batch_index, image_batch in enumerate(tqdm(dataset)):
             temp_loss = []
             for _ in range(critic_iterations):
                 temp_loss.append(critic_train_step(generator, critic, image_batch, noise_dim))
             critic_loss_hist.append(tf.reduce_mean(temp_loss))
             generator_loss_hist.append(generator_train_step(generator, critic, image_batch.shape[0], noise_dim))
 
+            if batch_index % 100 == 0 and batch_index > 0:
+                write_tensorboard_logs(critic_file_writer, 'Loss', tf.reduce_mean(critic_loss_hist), step, 'scalar')
+                write_tensorboard_logs(generator_file_writer, 'Loss', tf.reduce_mean(generator_loss_hist), step, 'scalar')
+
+                write_tensorboard_logs(generator_file_writer, 'Generated Images', generate_and_save_images(generator.get_model(), seed), step,
+                                       'image')
+
+                step += 1
+
         # Produce images for the GIF as you go
-        generate_and_save_images(generator.get_model(), epoch + 1, seed, img_path)
+        generate_and_save_images(generator.get_model(), seed, epoch + 1, img_path)
 
-        print('Epoch: {}/{} - Time: {:.2f} seconds - Critic Loss: {:.4f} - Generator Loss: {:.4f}'.format(epoch + 1, epochs, time.time() - start,
-                                                                                                          critic_loss_hist[-1],
-                                                                                                          generator_loss_hist[-1]))
+        tqdm.write(('Critic Loss: {:.4f} - Generator Loss: {:.4f}'.format(tf.reduce_mean(critic_loss_hist), tf.reduce_mean(generator_loss_hist))))
 
-    print("\n---------- Training loop finished. ----------\n")
+        generator_loss_hist.clear()
+        critic_loss_hist.clear()
+
+    tqdm.write("\n---------- Training loop finished. ----------\n")
 
 
 def main():
@@ -137,8 +168,17 @@ def main():
     args = get_args()
 
     # Create directory for images
-    img_path = pathlib.Path(__file__).resolve().parents[1] / pathlib.Path("img") / datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    current_time = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+
+    img_path = pathlib.Path(__file__).resolve().parents[1] / pathlib.Path("img") / current_time
     img_path.mkdir(parents=True)
+
+    # Tensorboard file writer for training logs
+    critic_log_dir = "logs/{}/critic/".format(current_time)
+    generator_log_dir = "logs/{}/generator/".format(current_time)
+
+    critic_file_writer = tf.summary.create_file_writer(critic_log_dir)
+    generator_file_writer = tf.summary.create_file_writer(generator_log_dir)
 
     # Create Generator and Critic models
     generator = Generator(learning_rate=args['learning_rate'])
@@ -153,10 +193,12 @@ def main():
           args['epochs'],
           args['num_generate'],
           args['noise_dim'],
-          args['critic_iterations'])
+          args['critic_iterations'],
+          critic_file_writer,
+          generator_file_writer)
 
     # Create gif from all images created during training
-    create_gif('{}/dcgan.gif'.format(img_path), '{}/image*.png'.format(img_path), delete_file=True)
+    create_gif('{}/wgan_gp.gif'.format(img_path), '{}/image*.png'.format(img_path), delete_file=True)
 
 
 if __name__ == '__main__':
