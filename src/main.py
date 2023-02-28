@@ -20,6 +20,7 @@ if len(physical_devices) > 0:
 else:
     tqdm.write('No GPU available for model training. Using CPU instead.\n')
 
+from data import AnimeFacesLoader
 from model import Generator, Critic
 from utils import create_gif
 
@@ -34,6 +35,8 @@ def get_args():
     parser.add_argument('-u', '--num_generate', type=int, help='Dimension for noise vector used by the generator.', default=16)
     parser.add_argument('-s', '--buffer_size', type=int, help='Buffer size for dataset shuffle.', default=60000)
     parser.add_argument('-c', '--critic_iterations', type=int, help='Number of critic iterations per generator iteration', default=5)
+    parser.add_argument('-d', '--dataset', type=str, required=True, help='Image dataset that is going to be used (mnist, anime_faces)')
+    parser.add_argument('-p', '--dataset_path', type=str, help='Path for the dataset that is going to be used', default=None)
 
     return vars(parser.parse_args())
 
@@ -48,14 +51,29 @@ def load_dataset(buffer_size, batch_size):
     return tf.data.Dataset.from_tensor_slices(train_images).shuffle(buffer_size).batch(batch_size)
 
 
-def generate_and_save_images(model, test_input, epoch=None, img_path=None):
+def get_dataset_loader(dataset_name, batch_size, dataset_path=None):
+    if dataset_name == 'mnist':
+        # TODO: Create loader for MNIST
+        pass
+    elif dataset_name == 'anime_faces':
+        if dataset_path is None:
+            raise IOError('Dataset path is required.')
+        return AnimeFacesLoader(dataset_path, batch_size=batch_size, conv_block_total=3, width=64, height=64, channels=3)
+    else:
+        raise ValueError('Invalid dataset. if you wish to use a new one, please implement a loader for it.')
+
+
+def generate_and_save_images(model, test_input, loader, epoch=None, img_path=None):
     predictions = model(test_input, training=False)
 
     fig = plt.figure(figsize=(4, 4))
 
     for i in range(predictions.shape[0]):
         plt.subplot(4, 4, i + 1)
-        plt.imshow(predictions[i, :, :, 0] * 127.5 + 127.5, cmap='gray')
+        if loader.get_image_channels() == 1:
+            plt.imshow(loader.denormalize(predictions[i, :, :, 0]), cmap='gray')
+        else:
+            plt.imshow(loader.denormalize(predictions[i, :, :, :]))
         plt.axis('off')
 
     if epoch is not None and img_path is not None:
@@ -124,7 +142,7 @@ def generator_train_step(generator, critic, batch_size, noise_dim):
     return gen_loss
 
 
-def train(generator, critic, dataset, img_path, epochs, num_generate, noise_dim, critic_iterations, critic_file_writer, generator_file_writer):
+def train(generator, critic, loader, img_path, epochs, num_generate, noise_dim, critic_iterations, critic_file_writer, generator_file_writer):
     tqdm.write("\n---------- Starting training loop... ----------\n")
 
     seed = tf.random.normal([num_generate, noise_dim])
@@ -136,24 +154,26 @@ def train(generator, critic, dataset, img_path, epochs, num_generate, noise_dim,
     for epoch in range(epochs):
         tqdm.write('Epoch: {}/{}'.format(epoch + 1, epochs))
 
-        for batch_index, image_batch in enumerate(tqdm(dataset)):
+        for batch_idx in tqdm(range(loader.get_batches_amount())):
+            image_batch = loader.get_batch(batch_idx)
             temp_loss = []
+
             for _ in range(critic_iterations):
                 temp_loss.append(critic_train_step(generator, critic, image_batch, noise_dim))
             critic_loss_hist.append(tf.reduce_mean(temp_loss))
             generator_loss_hist.append(generator_train_step(generator, critic, image_batch.shape[0], noise_dim))
 
-            if batch_index % 100 == 0 and batch_index > 0:
+            if batch_idx % 100 == 0 and batch_idx > 0:
                 write_tensorboard_logs(critic_file_writer, 'Loss', tf.reduce_mean(critic_loss_hist), step, 'scalar')
                 write_tensorboard_logs(generator_file_writer, 'Loss', tf.reduce_mean(generator_loss_hist), step, 'scalar')
 
-                write_tensorboard_logs(generator_file_writer, 'Generated Images', generate_and_save_images(generator.get_model(), seed), step,
+                write_tensorboard_logs(generator_file_writer, 'Generated Images', generate_and_save_images(generator.get_model(), seed, loader), step,
                                        'image')
 
                 step += 1
 
         # Produce images for the GIF as you go
-        generate_and_save_images(generator.get_model(), seed, epoch + 1, img_path)
+        generate_and_save_images(generator.get_model(), seed, loader, epoch + 1, img_path)
 
         tqdm.write(('Critic Loss: {:.4f} - Generator Loss: {:.4f}'.format(tf.reduce_mean(critic_loss_hist), tf.reduce_mean(generator_loss_hist))))
 
@@ -180,15 +200,24 @@ def main():
     critic_file_writer = tf.summary.create_file_writer(critic_log_dir)
     generator_file_writer = tf.summary.create_file_writer(generator_log_dir)
 
+    # Get loader for specified dataset
+    loader = get_dataset_loader(args['dataset'], args['batch_size'], args['dataset_path'])
+
     # Create Generator and Critic models
-    generator = Generator(learning_rate=args['learning_rate'])
-    critic = Critic(learning_rate=args['learning_rate'])
+    generator = Generator(learning_rate=args['learning_rate'],
+                          conv_blocks_total=loader.get_conv_block_total(),
+                          initial_width=loader.get_initial_generator_width(),
+                          initial_height=loader.get_initial_generator_height(),
+                          channels=loader.get_image_channels())
+
+    critic = Critic(learning_rate=args['learning_rate'],
+                    conv_blocks_total=loader.get_conv_block_total(),
+                    input_shape=loader.get_image_shape())
 
     # Train loop
     train(generator,
           critic,
-          load_dataset(args['buffer_size'],
-                       args['batch_size']),
+          loader,
           img_path,
           args['epochs'],
           args['num_generate'],
