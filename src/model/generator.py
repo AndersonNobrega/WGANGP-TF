@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from tensorflow.keras import initializers, layers, optimizers, Sequential
+from tensorflow.keras import initializers, layers, optimizers, Sequential, Model
 
 
 class Generator:
@@ -13,25 +13,28 @@ class Generator:
         self._model.summary()
 
     def _create_model(self):
-        model = Sequential(name='Generator')
-        model.add(layers.Dense(7 * 7 * (self._FEATURE_MAP * 2), input_shape=(100,), use_bias=False, activation='linear'))
+        inpt = layers.Input(shape=(100,))
 
-        model.add(layers.Reshape((7, 7, (self._FEATURE_MAP * 2))))
+        output = layers.Dense(7 * 7 * (self._FEATURE_MAP * 2), use_bias=False, activation='linear')(inpt)
+        output = layers.Reshape((7, 7, (self._FEATURE_MAP * 2)))(output)
 
-        model.add(layers.Conv2DTranspose(self._FEATURE_MAP * 2, kernel_size=(5, 5), strides=(1, 1), padding='same', use_bias=False,
-                                         kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02)))
-        model.add(layers.LayerNormalization())
-        model.add(layers.ReLU())
+        output = self._conv_block(output, 2)
+        output = self._conv_block(output, 1)
 
-        model.add(layers.Conv2DTranspose(self._FEATURE_MAP * 1, kernel_size=(5, 5), strides=(2, 2), padding='same', use_bias=False,
-                                         kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02)))
-        model.add(layers.LayerNormalization())
-        model.add(layers.ReLU())
+        output = layers.Conv2DTranspose(1, kernel_size=(5, 5), strides=(1, 1), padding='same', use_bias=False, activation='tanh',
+                                        kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02))(output)
 
-        model.add(layers.Conv2DTranspose(1, kernel_size=(5, 5), strides=(2, 2), padding='same', use_bias=False, activation='tanh',
-                                         kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02)))
+        model = Model(inpt, output, name='Generator')
 
         return model
+
+    def _conv_block(self, inpt, upscaling_factor):
+        output = layers.Conv2DTranspose(self._FEATURE_MAP * upscaling_factor, kernel_size=(5, 5), strides=(2, 2), padding='same', use_bias=False,
+                                        kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02))(inpt)
+        output = layers.BatchNormalization()(output)
+        output = layers.ReLU()(output)
+
+        return output
 
     def get_model(self):
         return self._model

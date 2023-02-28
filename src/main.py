@@ -94,7 +94,7 @@ def critic_train_step(generator, critic, real_input_batch, noise_dim):
             mixed_predictions = critic.get_model()(mixed_output, training=True)
 
         grad = gp_tape.gradient(mixed_predictions, mixed_output)
-        grad_norm = tf.sqrt(tf.reduce_sum(tf.square(grad)))
+        grad_norm = tf.sqrt(tf.reduce_sum(tf.square(grad), axis=[1, 2, 3]))
         grad_penalty = tf.reduce_mean(tf.square(grad_norm - 1))
 
         critic_real_output = critic.get_model()(real_input_batch, training=True)

@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from tensorflow.keras import initializers, layers, optimizers, Sequential
+from tensorflow.keras import initializers, layers, optimizers, Model
 
 
 class Critic:
@@ -13,21 +13,25 @@ class Critic:
         self._model.summary()
 
     def _create_model(self):
-        model = Sequential(name='Critic')
-        model.add(layers.Conv2D(self._FEATURE_MAP * 1, input_shape=[28, 28, 1], kernel_size=(5, 5), strides=(2, 2), padding='same',
-                                use_bias=False, kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02)))
-        model.add(layers.LayerNormalization())
-        model.add(layers.LeakyReLU(0.2))
+        inpt = layers.Input(shape=(28, 28, 1))
 
-        model.add(layers.Conv2D(self._FEATURE_MAP * 2, kernel_size=(5, 5), strides=(2, 2), padding='same', use_bias=False,
-                                kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02)))
-        model.add(layers.LayerNormalization())
-        model.add(layers.LeakyReLU(0.2))
+        output = self._conv_block(inpt, 1)
+        output = self._conv_block(output, 2)
 
-        model.add(layers.Flatten())
-        model.add(layers.Dense(1, activation='linear'))
+        output = layers.Flatten()(output)
+        output = layers.Dense(1, activation='linear')(output)
+
+        model = Model(inpt, output, name='Critic')
 
         return model
+
+    def _conv_block(self, inpt, downscaling_factor):
+        output = layers.Conv2D(self._FEATURE_MAP * downscaling_factor, input_shape=[28, 28, 1], kernel_size=(5, 5), strides=(2, 2), padding='same',
+                               use_bias=False, kernel_initializer=initializers.RandomNormal(mean=0., stddev=0.02))(inpt)
+        output = layers.LayerNormalization()(output)
+        output = layers.LeakyReLU(0.2)(output)
+
+        return output
 
     def get_model(self):
         return self._model
