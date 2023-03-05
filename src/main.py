@@ -22,7 +22,7 @@ else:
 
 from data import AnimeFacesLoader
 from model import Generator, Critic
-from utils import create_gif
+from utils import CheckpointManager, create_gif
 
 
 def get_args():
@@ -37,6 +37,8 @@ def get_args():
     parser.add_argument('-c', '--critic_iterations', type=int, help='Number of critic iterations per generator iteration', default=5)
     parser.add_argument('-d', '--dataset', type=str, required=True, help='Image dataset that is going to be used (mnist, anime_faces)')
     parser.add_argument('-p', '--dataset_path', type=str, help='Path for the dataset that is going to be used', default=None)
+    parser.add_argument('-t', '--checkpoint_epoch', type=int, help='Amount of epochs before creating a checkpoint. If value is 0 or negative, '
+                                                                   'checkpoints wont be created', default=10)
 
     return vars(parser.parse_args())
 
@@ -142,7 +144,8 @@ def generator_train_step(generator, critic, batch_size, noise_dim):
     return gen_loss
 
 
-def train(generator, critic, loader, img_path, epochs, num_generate, noise_dim, critic_iterations, critic_file_writer, generator_file_writer):
+def train(generator, critic, loader, img_path, epochs, num_generate, noise_dim, critic_iterations, critic_file_writer, generator_file_writer,
+          checkpoint_manager):
     tqdm.write("\n---------- Starting training loop... ----------\n")
 
     seed = tf.random.normal([num_generate, noise_dim])
@@ -171,6 +174,9 @@ def train(generator, critic, loader, img_path, epochs, num_generate, noise_dim, 
                                        'image')
 
                 step += 1
+
+        # Check epoch and save a checkpoint if necessary
+        checkpoint_manager.save(epoch)
 
         # Produce images for the GIF as you go
         generate_and_save_images(generator.get_model(), seed, loader, epoch + 1, img_path)
@@ -214,6 +220,10 @@ def main():
                     conv_blocks_total=loader.get_conv_block_total(),
                     input_shape=loader.get_image_shape())
 
+    # Create checkpoint object
+    checkpoint_path = pathlib.Path(__file__).resolve().parents[1] / pathlib.Path("checkpoints") / current_time
+    checkpoint_manager = CheckpointManager(generator, critic, checkpoint_path, args['checkpoint_epoch'])
+
     # Train loop
     train(generator,
           critic,
@@ -224,7 +234,8 @@ def main():
           args['noise_dim'],
           args['critic_iterations'],
           critic_file_writer,
-          generator_file_writer)
+          generator_file_writer,
+          checkpoint_manager)
 
     # Create gif from all images created during training
     create_gif('{}/wgan_gp.gif'.format(img_path), '{}/image*.png'.format(img_path), delete_file=True)
