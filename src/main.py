@@ -28,17 +28,18 @@ from utils import CheckpointManager, create_gif
 def get_args():
     parser = ArgumentParser(allow_abbrev=False, description='', formatter_class=ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('-b', '--batch_size', type=int, help='Batch size for the training dataset.', default=256)
-    parser.add_argument('-e', '--epochs', type=int, help='Amount of epochs to train model.', default=1)
-    parser.add_argument('-l', '--learning_rate', type=float, help='Learning rate for both the generator and critic models.', default=3e-4)
-    parser.add_argument('-n', '--noise_dim', type=int, help='Dimension for noise vector used by the generator.', default=100)
-    parser.add_argument('-u', '--num_generate', type=int, help='Dimension for noise vector used by the generator.', default=16)
-    parser.add_argument('-s', '--buffer_size', type=int, help='Buffer size for dataset shuffle.', default=60000)
-    parser.add_argument('-c', '--critic_iterations', type=int, help='Number of critic iterations per generator iteration', default=5)
-    parser.add_argument('-d', '--dataset', type=str, required=True, help='Image dataset that is going to be used (mnist, anime_faces)')
-    parser.add_argument('-p', '--dataset_path', type=str, help='Path for the dataset that is going to be used', default=None)
-    parser.add_argument('-t', '--checkpoint_epoch', type=int, help='Amount of epochs before creating a checkpoint. If value is 0 or negative, '
-                                                                   'checkpoints wont be created', default=10)
+    parser.add_argument('--batch_size', type=int, help='Batch size for the training dataset.', default=256)
+    parser.add_argument('--epochs', type=int, help='Amount of epochs to train model.', default=1)
+    parser.add_argument('--learning_rate', type=float, help='Learning rate for both the generator and critic models.', default=3e-4)
+    parser.add_argument('--noise_dim', type=int, help='Dimension for noise vector used by the generator.', default=100)
+    parser.add_argument('--num_generate', type=int, help='Dimension for noise vector used by the generator.', default=16)
+    parser.add_argument('--buffer_size', type=int, help='Buffer size for dataset shuffle.', default=60000)
+    parser.add_argument('--critic_iterations', type=int, help='Number of critic iterations per generator iteration.', default=5)
+    parser.add_argument('--dataset', type=str, required=True, help='Image dataset that is going to be used (mnist, anime_faces).')
+    parser.add_argument('--dataset_path', type=str, help='Path for the dataset that is going to be used.', default=None)
+    parser.add_argument('--checkpoint_epoch', type=int, help='Amount of epochs before creating a checkpoint. If value is 0 or negative, checkpoints '
+                                                             'wont be created.', default=10)
+    parser.add_argument('--load_checkpoint', type=str, help='Path to restore model from a checkpoint.', default=None)
 
     return vars(parser.parse_args())
 
@@ -221,7 +222,10 @@ def main():
                     input_shape=loader.get_image_shape())
 
     # Create checkpoint object
-    checkpoint_path = pathlib.Path(__file__).resolve().parents[1] / pathlib.Path("checkpoints") / current_time
+    if args['load_checkpoint'] is not None:
+        checkpoint_path = args['load_checkpoint']
+    else:
+        checkpoint_path = pathlib.Path(__file__).resolve().parents[1] / pathlib.Path("checkpoints") / current_time
     checkpoint_manager = CheckpointManager(generator, critic, checkpoint_path, args['checkpoint_epoch'])
 
     # Train loop
